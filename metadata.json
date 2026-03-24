@@ -1,0 +1,9 @@
+{
+  "name": "Aura: Your Loyal AI",
+  "description": "A highly personalized AI assistant with real-time vision, voice, and system control. Optimized for Android with a dedicated Security Core and Neural Link for phone navigation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}

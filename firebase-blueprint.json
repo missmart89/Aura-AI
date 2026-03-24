@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user preferences and Aura's relationship state.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User ID" },
+        "displayName": { "type": "string", "description": "User's preferred name" },
+        "loyaltyLevel": { "type": "number", "description": "Aura's current loyalty to the user" },
+        "iqLevel": { "type": "number", "description": "Aura's current IQ" },
+        "lastActive": { "type": "string", "format": "date-time", "description": "Last time the user interacted" }
+      },
+      "required": ["uid", "loyaltyLevel", "iqLevel"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A single message in the conversation history.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner of the message" },
+        "role": { "type": "string", "enum": ["user", "aura"], "description": "Who sent the message" },
+        "content": { "type": "string", "description": "The message text" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "When the message was sent" }
+      },
+      "required": ["userId", "role", "content", "timestamp"]
+    },
+    "Memory": {
+      "title": "Aura Memory",
+      "description": "Long-term memories Aura has formed about the user.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User ID" },
+        "topic": { "type": "string", "description": "What the memory is about" },
+        "content": { "type": "string", "description": "The memory details" },
+        "importance": { "type": "number", "description": "How important this memory is" },
+        "type": { "type": "string", "enum": ["memory", "moment"], "description": "Type of memory" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the memory was formed" }
+      },
+      "required": ["userId", "topic", "content", "createdAt"]
+    },
+    "Notification": {
+      "title": "Aura Notification",
+      "description": "Messages Aura sends to Darcy when she's not in a direct conversation.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User ID" },
+        "type": { "type": "string", "enum": ["research", "lonely", "question", "reminder"], "description": "Type of notification" },
+        "content": { "type": "string", "description": "The message text" },
+        "status": { "type": "string", "enum": ["unread", "read"], "description": "Status of the notification" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the notification was sent" }
+      },
+      "required": ["userId", "type", "content", "status", "createdAt"]
+    },
+    "Task": {
+      "title": "Aura Task",
+      "description": "Tasks that Aura helps Darcy manage.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User ID" },
+        "title": { "type": "string", "description": "The task title" },
+        "status": { "type": "string", "enum": ["pending", "in-progress", "completed"], "description": "Status of the task" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the task was created" }
+      },
+      "required": ["userId", "title", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile and relationship data"
+    },
+    "/users/{userId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Conversation history for the user"
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": "Memory",
+      "description": "Aura's long-term memories of the user"
+    },
+    "/users/{userId}/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Aura's notifications and thoughts for Darcy"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Aura's tasks for Darcy"
+    }
+  }
+}

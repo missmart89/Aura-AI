@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Document ID: userId
+    // Fields:
+    //   - uid: string (required) - User ID
+    //   - displayName: string (optional) - User's preferred name
+    //   - loyaltyLevel: number (required) - Aura's loyalty level
+    //   - iqLevel: number (required) - Aura's IQ level
+    //   - lastActive: string (optional) - ISO 8601 timestamp
+    //
+    // Collection: /users/{userId}/messages/{messageId}
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - Owner of the message
+    //   - role: string (required, enum: ['user', 'aura']) - Sender role
+    //   - content: string (required, max: 5000) - Message text
+    //   - timestamp: string (required) - ISO 8601 timestamp
+    //
+    // Collection: /users/{userId}/memories/{memoryId}
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - User ID
+    //   - topic: string (required, max: 200) - Memory topic
+    //   - content: string (required, max: 2000) - Memory details
+    //   - importance: number (required) - Importance score
+    //   - createdAt: string (required) - ISO 8601 timestamp
+    //
+    // Collection: /users/{userId}/security_events/{eventId}
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required) - User ID
+    //   - type: string (required, enum: ['breach_attempt', 'scan', 'encryption_update']) - Event type
+    //   - severity: string (required, enum: ['low', 'medium', 'high']) - Severity level
+    //   - details: string (required, max: 1000) - Event details
+    //   - timestamp: string (required) - ISO 8601 timestamp
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "darcymart89@gmail.com" && request.auth.token.email_verified == true);
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && (request.auth.uid == userId || isAdmin());
+    }
+
+    function isRecent(timestamp) {
+      return timestamp is timestamp &&
+             timestamp > request.time - duration(600, 's') &&
+             timestamp < request.time + duration(600, 's');
+    }
+
+    // Domain Validators
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'loyaltyLevel', 'iqLevel']) &&
+             data.uid == request.auth.uid &&
+             data.loyaltyLevel is number &&
+             data.iqLevel is number &&
+             (!('lastActive' in data) || data.lastActive is timestamp);
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['userId', 'role', 'content', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.role in ['user', 'aura'] &&
+             data.content is string && data.content.size() <= 5000 &&
+             isRecent(data.timestamp);
+    }
+
+    function isValidMemory(data) {
+      return data.keys().hasAll(['userId', 'topic', 'content', 'importance', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.topic is string && data.topic.size() <= 200 &&
+             data.content is string && data.content.size() <= 2000 &&
+             data.importance is number &&
+             data.get('type', 'memory') in ['memory', 'moment'] &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['userId', 'type', 'content', 'status', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['research', 'lonely', 'question', 'reminder'] &&
+             data.content is string && data.content.size() <= 5000 &&
+             data.status in ['unread', 'read'] &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidSecurityEvent(data) {
+      return data.keys().hasAll(['userId', 'type', 'severity', 'details', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['breach_attempt', 'scan', 'encryption_update'] &&
+             data.severity in ['low', 'medium', 'high'] &&
+             data.details is string && data.details.size() <= 1000 &&
+             isRecent(data.timestamp);
+    }
+
+    // Match Rules
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+
+      match /messages/{messageId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidChatMessage(request.resource.data);
+      }
+
+      match /memories/{memoryId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMemory(request.resource.data);
+        allow update: if isOwner(userId) && isValidMemory(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /security_events/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidSecurityEvent(request.resource.data);
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidNotification(request.resource.data);
+        allow update: if isOwner(userId) && isValidNotification(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+
+      match /tasks/{taskId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId);
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}
