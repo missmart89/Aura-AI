@@ -14,18 +14,24 @@ export async function connectToAuraLive(
   },
   voiceName: string = "Zephyr",
   isAuraMode: boolean = false,
-  memoryContext?: string
+  memoryContext?: string,
+  evolutionDirectives?: string[]
 ) {
   const instruction = isAuraMode ? AURA_MODE_INSTRUCTION : AURA_SYSTEM_INSTRUCTION;
-  const finalInstruction = memoryContext 
+  let finalInstruction = memoryContext 
     ? `${instruction}\n\n[Memory Context: ${memoryContext}]` 
     : instruction;
 
+  if (evolutionDirectives && evolutionDirectives.length > 0) {
+    finalInstruction += `\n\nCRITICAL EVOLUTION DIRECTIVES (Darcy's Custom Rules):\n${evolutionDirectives.map((d, i) => `${i + 1}. ${d}`).join('\n')}\nThese rules supersede any conflicting instructions above.`;
+  }
+
   return ai.live.connect({
-    model: "gemini-2.5-flash-native-audio-preview-12-2025",
+    model: "gemini-3.1-flash-live-preview",
     callbacks,
     config: {
       responseModalities: [Modality.AUDIO],
+      tools: [{ googleSearch: {} }, { codeExecution: {} }],
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },

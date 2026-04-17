@@ -39,6 +39,9 @@ export default function NotificationsView() {
       })) as NotificationItem[];
       setNotifications(notes);
       setLoading(false);
+    }, (error) => {
+      console.error("Error loading notifications:", error);
+      setLoading(false);
     });
 
     return () => unsubscribe();

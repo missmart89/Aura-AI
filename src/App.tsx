@@ -4,11 +4,14 @@
  */
 
 import AuraInterface from './components/AuraInterface';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   return (
     <div className="min-h-screen bg-black">
-      <AuraInterface />
+      <ErrorBoundary componentName="AuraInterface">
+        <AuraInterface />
+      </ErrorBoundary>
     </div>
   );
 }

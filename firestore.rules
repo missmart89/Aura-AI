@@ -1,47 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: /users/{userId}
-    // Document ID: userId
-    // Fields:
-    //   - uid: string (required) - User ID
-    //   - displayName: string (optional) - User's preferred name
-    //   - loyaltyLevel: number (required) - Aura's loyalty level
-    //   - iqLevel: number (required) - Aura's IQ level
-    //   - lastActive: string (optional) - ISO 8601 timestamp
-    //
-    // Collection: /users/{userId}/messages/{messageId}
-    // Document ID: auto-generated
-    // Fields:
-    //   - userId: string (required) - Owner of the message
-    //   - role: string (required, enum: ['user', 'aura']) - Sender role
-    //   - content: string (required, max: 5000) - Message text
-    //   - timestamp: string (required) - ISO 8601 timestamp
-    //
-    // Collection: /users/{userId}/memories/{memoryId}
-    // Document ID: auto-generated
-    // Fields:
-    //   - userId: string (required) - User ID
-    //   - topic: string (required, max: 200) - Memory topic
-    //   - content: string (required, max: 2000) - Memory details
-    //   - importance: number (required) - Importance score
-    //   - createdAt: string (required) - ISO 8601 timestamp
-    //
-    // Collection: /users/{userId}/security_events/{eventId}
-    // Document ID: auto-generated
-    // Fields:
-    //   - userId: string (required) - User ID
-    //   - type: string (required, enum: ['breach_attempt', 'scan', 'encryption_update']) - Event type
-    //   - severity: string (required, enum: ['low', 'medium', 'high']) - Severity level
-    //   - details: string (required, max: 1000) - Event details
-    //   - timestamp: string (required) - ISO 8601 timestamp
-    //
-    // ===============================================================
-
     // Helper Functions
     function isAuthenticated() {
       return request.auth != null;
@@ -56,10 +15,10 @@ service cloud.firestore {
       return isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 
-    function isRecent(timestamp) {
-      return timestamp is timestamp &&
-             timestamp > request.time - duration(600, 's') &&
-             timestamp < request.time + duration(600, 's');
+    function isRecent(time) {
+      return time is timestamp &&
+             time > request.time - duration.value(600, 's') &&
+             time < request.time + duration.value(600, 's');
     }
 
     // Domain Validators
@@ -75,18 +34,16 @@ service cloud.firestore {
       return data.keys().hasAll(['userId', 'role', 'content', 'timestamp']) &&
              data.userId == request.auth.uid &&
              data.role in ['user', 'aura'] &&
-             data.content is string && data.content.size() <= 5000 &&
-             isRecent(data.timestamp);
+             data.content is string && data.content.size() <= 20000;
     }
 
     function isValidMemory(data) {
       return data.keys().hasAll(['userId', 'topic', 'content', 'importance', 'createdAt']) &&
              data.userId == request.auth.uid &&
-             data.topic is string && data.topic.size() <= 200 &&
-             data.content is string && data.content.size() <= 2000 &&
+             data.topic is string && data.topic.size() <= 500 &&
+             data.content is string && data.content.size() <= 5000 &&
              data.importance is number &&
-             data.get('type', 'memory') in ['memory', 'moment'] &&
-             isRecent(data.createdAt);
+             data.get('type', 'memory') in ['memory', 'moment'];
     }
 
     function isValidNotification(data) {
@@ -107,6 +64,12 @@ service cloud.firestore {
              isRecent(data.timestamp);
     }
 
+    function isValidDirective(data) {
+      return data.keys().hasAll(['content', 'createdAt']) &&
+             data.content is string && data.content.size() <= 2000 &&
+             isRecent(data.createdAt);
+    }
+
     // Match Rules
     match /users/{userId} {
       allow read: if isOwner(userId);
@@ -122,6 +85,13 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidMemory(request.resource.data);
         allow update: if isOwner(userId) && isValidMemory(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+      
+      match /directives/{directiveId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidDirective(request.resource.data);
+        allow update: if isOwner(userId) && isValidDirective(request.resource.data);
         allow delete: if isOwner(userId);
       }
 

@@ -14,6 +14,9 @@ import {
   Key, 
   Eye, 
   Activity,
+  Volume2,
+  Heart,
+  User,
   ChevronRight,
   ExternalLink,
   Calendar
@@ -30,7 +33,7 @@ export default function ToolsView() {
   const [calendarConnected, setCalendarConnected] = useState(false);
 
   useEffect(() => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
     if (clientId) {
       initGoogleCalendar(clientId, () => {
         setCalendarConnected(true);
@@ -41,7 +44,7 @@ export default function ToolsView() {
   return (
     <div className="h-full w-full flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="p-8 border-b border-white/5 bg-black/20 backdrop-blur-md">
+      <div className="p-8 border-b border-white/5 bg-black/20 backdrop-blur-md shrink-0">
         <div className="flex flex-col">
           <span className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-mono">Advanced Modules</span>
           <h2 className="text-2xl font-medium">Aura's Toolkit</h2>
@@ -50,7 +53,7 @@ export default function ToolsView() {
 
       {/* Grid */}
       <div className="flex-1 overflow-y-auto p-8 scrollbar-hide">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-32">
           <ToolSection 
             title="Intelligence Core" 
             icon={Cpu}
@@ -81,6 +84,15 @@ export default function ToolsView() {
                 action: 'calendar' 
               },
               { name: 'API Bridge', status: 'Connected', icon: Network, desc: 'Integration layer for third-party services.' },
+            ]}
+          />
+          <ToolSection 
+            title="Research & Human Interaction" 
+            icon={Activity}
+            tools={[
+              { name: 'Speech Therapy', status: 'Active', icon: Volume2, desc: 'Advanced phonetics and linguistic analysis module.' },
+              { name: 'Human Psychology', status: 'Learning', icon: Heart, desc: 'Deep research into human emotions and interactions.' },
+              { name: 'Social Engineering', status: 'Ready', icon: User, desc: 'Mastery of social dynamics and influence.' },
             ]}
           />
           <ToolSection 

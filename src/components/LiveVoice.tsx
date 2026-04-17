@@ -14,7 +14,10 @@ export default function LiveVoice({
   voiceName = "Zephyr", 
   micSensitivity = 1.0, 
   speechSpeed = 1.0,
-  isAuraMode = false
+  isAuraMode = false,
+  onVoiceChange,
+  initialCommand = null,
+  directives = []
 }: { 
   user: FirebaseUser | null,
   onClose: () => void, 
@@ -22,7 +25,10 @@ export default function LiveVoice({
   voiceName?: string, 
   micSensitivity?: number, 
   speechSpeed?: number,
-  isAuraMode?: boolean
+  isAuraMode?: boolean,
+  onVoiceChange?: (voice: string) => void,
+  initialCommand?: string | null,
+  directives?: string[]
 }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -30,8 +36,10 @@ export default function LiveVoice({
   const [audioLevel, setAudioLevel] = useState(0);
   const [transcript, setTranscript] = useState<{ role: 'user' | 'aura', text: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [currentVoice, setCurrentVoice] = useState(voiceName);
   const sessionRef = useRef<any>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const audioQueue = useRef<Float32Array[]>([]);
@@ -56,6 +64,12 @@ export default function LiveVoice({
           onopen: () => {
             setIsConnected(true);
             startAudioCapture();
+            if (initialCommand) {
+              session.sendRealtimeInput({
+                text: initialCommand
+              });
+              updateTranscript('user', initialCommand);
+            }
           },
           onmessage: async (msg) => {
             // Handle Audio
@@ -81,12 +95,24 @@ export default function LiveVoice({
               updateTranscript('user', userTranscript);
             }
           },
-          onerror: (err) => console.error('Live error:', err),
+          onerror: (err: any) => {
+            console.error('Live error:', err);
+            if (err.message && (err.message.includes("API key expired") || err.message.includes("API_KEY_INVALID"))) {
+              setError('Neural Link Severed: The API key has expired. Please renew it in settings.');
+            } else {
+              setError('The service is currently unavailable.');
+            }
+          },
           onclose: () => setIsConnected(false),
-        }, voiceName, isAuraMode, memoryContext);
+        }, currentVoice, isAuraMode, memoryContext, directives);
         sessionRef.current = session;
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to connect to Live API:', err);
+        if (err.message && (err.message.includes("API key expired") || err.message.includes("API_KEY_INVALID"))) {
+          setError('Neural Link Severed: The API key has expired. Please renew it in settings.');
+        } else {
+          setError('Failed to connect to Aura. The service might be overloaded.');
+        }
       }
     };
 
@@ -94,10 +120,27 @@ export default function LiveVoice({
 
     return () => {
       sessionRef.current?.close();
-      audioContextRef.current?.close();
+      if (processorRef.current) {
+        processorRef.current.disconnect();
+      }
+      if (gainNodeRef.current) {
+        gainNodeRef.current.disconnect();
+      }
+      if (audioContextRef.current?.state !== 'closed') {
+        audioContextRef.current?.close();
+      }
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+      }
       stopScreenShare();
     };
-  }, []);
+  }, [currentVoice]);
+
+  const handleVoiceChange = (newVoice: string) => {
+    setCurrentVoice(newVoice);
+    if (onVoiceChange) onVoiceChange(newVoice);
+    // The useEffect will restart the session with the new voice
+  };
 
   const startScreenShare = async () => {
     try {
@@ -187,6 +230,7 @@ export default function LiveVoice({
     try {
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
       
@@ -277,9 +321,23 @@ export default function LiveVoice({
     >
       <div className="w-full max-w-2xl flex flex-col items-center text-center">
         {error && (
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <p>{error}</p>
+          <div className="absolute top-8 left-1/2 -translate-x-1/2 w-full max-w-md p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm flex flex-col gap-3 backdrop-blur-xl">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <p className="flex-1">{error}</p>
+            </div>
+            {error.includes("API key has expired") && (
+              <button 
+                onClick={() => {
+                  if ((window as any).aistudio?.openSelectKey) {
+                    (window as any).aistudio.openSelectKey().then(() => window.location.reload());
+                  }
+                }}
+                className="w-full py-2 bg-red-500/20 text-red-400 rounded-xl text-xs font-bold tracking-widest uppercase hover:bg-red-500/30 transition-colors"
+              >
+                Renew API Key
+              </button>
+            )}
           </div>
         )}
         <button onClick={onClose} className="absolute top-8 right-8 p-3 hover:bg-white/10 rounded-full transition-colors">
@@ -357,6 +415,18 @@ export default function LiveVoice({
             <div className="w-20 h-20 rounded-full bg-[#ff4e00] flex items-center justify-center shadow-[0_0_40px_rgba(255,78,0,0.5)]">
               <Volume2 className="w-10 h-10 text-white" />
             </div>
+            <select 
+              value={currentVoice} 
+              onChange={(e) => handleVoiceChange(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] uppercase tracking-widest font-medium text-white/60 outline-none focus:ring-1 focus:ring-[#ff4e00]"
+            >
+              <option value="Aoede">Aoede</option>
+              <option value="Kore">Kore</option>
+              <option value="Zephyr">Zephyr</option>
+              <option value="Fenrir">Fenrir</option>
+              <option value="Puck">Puck</option>
+              <option value="Charon">Charon</option>
+            </select>
             <span className="text-[10px] uppercase tracking-widest text-white/60 font-medium text-center">
               Aura Voice
             </span>
