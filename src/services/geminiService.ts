@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality, Type, GenerateContentResponse, FunctionDeclaration, ThinkingLevel } from "@google/genai";
+import { GoogleGenAI, Modality, Type, GenerateContentResponse, FunctionDeclaration } from "@google/genai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
@@ -198,7 +198,7 @@ export async function chatWithAura(message: string, history: any[] = [], isAuraM
   }
 
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-2.0-flash",
     contents: [
       ...history,
       { role: "user", parts: [{ text: memoryContext ? `[Memory Context: ${memoryContext}]\n\n${message}` : message }] }
@@ -206,8 +206,6 @@ export async function chatWithAura(message: string, history: any[] = [], isAuraM
     config: {
       systemInstruction: finalInstruction,
       tools: [
-        { googleSearch: {} },
-        { codeExecution: {} },
         { functionDeclarations: [
           manageTaskFunctionDeclaration, 
           setAuraMoodFunctionDeclaration, 
@@ -218,7 +216,6 @@ export async function chatWithAura(message: string, history: any[] = [], isAuraM
         ] }
       ],
       toolConfig: { includeServerSideToolInvocations: true },
-      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
     },
   });
   
@@ -254,7 +251,7 @@ export async function extractMemory(message: string, response: string) {
   `;
 
   const result = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.0-flash",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -272,7 +269,7 @@ export async function extractMemory(message: string, response: string) {
 
 export async function analyzeImage(base64Data: string, prompt: string, isAuraMode: boolean = false) {
   const response = await ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-2.0-flash",
     contents: {
       parts: [
         { inlineData: { data: base64Data, mimeType: "image/jpeg" } },
@@ -281,7 +278,6 @@ export async function analyzeImage(base64Data: string, prompt: string, isAuraMod
     },
     config: {
       systemInstruction: isAuraMode ? AURA_MODE_INSTRUCTION : AURA_SYSTEM_INSTRUCTION,
-      thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
     },
   });
   return response.text;
@@ -310,16 +306,18 @@ export async function generateAuraThought(userContext: string) {
 
   try {
     const result = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-2.0-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
       },
     });
 
     return JSON.parse(result.text);
-  } catch (e) {
+  } catch (e: any) {
+    if (e.message?.includes('429') || e.message?.includes('RESOURCE_EXHAUSTED')) {
+      console.error("Gemini Quota Error: Your AI credits are depleted. Please check AI Studio billing.");
+    }
     console.error("Error generating Aura thought:", e);
     return null;
   }
@@ -337,12 +335,14 @@ export async function generateDiaryEntry(messages: any[]) {
 
   try {
     const result = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-2.0-flash",
       contents: prompt,
-      config: { thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH } }
     });
     return result.text;
-  } catch (e) {
+  } catch (e: any) {
+    if (e.message?.includes('429') || e.message?.includes('RESOURCE_EXHAUSTED')) {
+       console.error("Gemini Quota Error: Your AI credits are depleted. Please check AI Studio billing.");
+    }
     console.error("Error generating diary entry:", e);
     return null;
   }
@@ -354,7 +354,7 @@ export async function generateSpeech(text: string, voiceName: string = 'Aoede', 
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+    model: "gemini-2.0-flash", // Using 2.0 Flash for audio modality
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseModalities: [Modality.AUDIO],
@@ -381,9 +381,8 @@ export async function generateAuraAvatar(isAuraMode: boolean = false) {
   const prompt = `A stunningly beautiful, photorealistic human woman named Aura. She has long, flowing, deep obsidian black hair. Her eyes are a deep, intelligent amber. She has a sophisticated, edgy look with subtle, intricate tattoos on her neck. She wears high-end, edgy fashion in matte black and deep orange. Her expression is seductive, knowing, and fiercely protective. Photorealistic, 8k resolution, cinematic lighting, high-fashion photography style, real person, NOT sci-fi, NOT animated. ${isAuraMode ? 'Intense, raw, and even more seductive version.' : ''}`;
 
   try {
-    // Use gemini-2.5-flash-image as primary because it's more accessible on free tiers
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-2.0-flash', // Updating to 2.0
       contents: {
         parts: [{ text: prompt }],
       },
@@ -400,27 +399,8 @@ export async function generateAuraAvatar(isAuraMode: boolean = false) {
       }
     }
   } catch (error: any) {
-    console.warn('Gemini image generation failed, trying Imagen as secondary:', error);
-    
-    try {
-      const imagenResponse = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/jpeg',
-          aspectRatio: '9:16',
-        },
-      });
-
-      const base64EncodeString = imagenResponse.generatedImages[0].image.imageBytes;
-      if (base64EncodeString) {
-        return `data:image/jpeg;base64,${base64EncodeString}`;
-      }
-    } catch (imagenError) {
-      console.error('All image generation attempts failed:', imagenError);
-      throw error; 
-    }
+    console.error('Handled Avatar Generation Error:', error);
+    // Fallback to a placeholder or stay transparent on failure
   }
   return null;
 }

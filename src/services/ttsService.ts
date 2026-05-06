@@ -9,7 +9,7 @@ export async function generateSpeech(text: string, voiceName: string = 'Zephyr',
     const prompt = `Say this ${tone} at a ${speed} pace with a ${accent} accent, including natural human-like cues like subtle hesitations or breaths where appropriate: ${text}`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
+      model: "gemini-2.0-flash",
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseModalities: [Modality.AUDIO],

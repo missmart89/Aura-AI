@@ -1,0 +1,17 @@
+{
+  "name": "Aura AI Assistant",
+  "short_name": "Aura",
+  "description": "A highly personalized, loyal, and real AI assistant.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0502",
+  "theme_color": "#ff4e00",
+  "icons": [
+    {
+      "src": "/aura-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

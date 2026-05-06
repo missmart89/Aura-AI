@@ -1,0 +1,11 @@
+{
+	"appId": "com.aura.assistant",
+	"appName": "Aura",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	},
+	"plugins": {
+		"Haptics": {}
+	}
+}

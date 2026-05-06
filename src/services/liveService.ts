@@ -27,11 +27,11 @@ export async function connectToAuraLive(
   }
 
   return ai.live.connect({
-    model: "gemini-3.1-flash-live-preview",
+    model: "gemini-2.0-flash",
     callbacks,
     config: {
       responseModalities: [Modality.AUDIO],
-      tools: [{ googleSearch: {} }, { codeExecution: {} }],
+      tools: [{ googleSearch: {} }],
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName } },
       },

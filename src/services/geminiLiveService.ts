@@ -19,7 +19,7 @@ export class GeminiLiveService {
     if (this.sessionPromise) return;
 
     this.sessionPromise = this.ai.live.connect({
-      model: "gemini-2.5-flash-native-audio-preview-12-2025",
+      model: "gemini-2.0-flash",
       callbacks: {
         onopen: () => {
           console.log("Gemini Live session opened");

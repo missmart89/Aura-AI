@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Mic, Volume2, Settings, Smartphone, Terminal, Globe } from 'lucide-react';
+import { Mic, Volume2, Settings, Smartphone, Terminal, Globe, Cpu, Battery, Activity } from 'lucide-react';
+import { Device, DeviceInfo, BatteryInfo } from '@capacitor/device';
 
 interface SettingsViewProps {
   voiceName: string;
@@ -62,18 +63,148 @@ export default function SettingsView({
     }
   }, [ttsEngine]);
 
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [batteryInfo, setBatteryInfo] = useState<BatteryInfo | null>(null);
+
+  useEffect(() => {
+    const fetchDeviceInfo = async () => {
+      try {
+        const info = await Device.getInfo();
+        const battery = await Device.getBatteryInfo();
+        setDeviceInfo(info);
+        setBatteryInfo(battery);
+      } catch (e) {
+        console.log('Not a native device environment');
+      }
+    };
+    fetchDeviceInfo();
+
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsAppInstalled(true);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+      setIsAppInstalled(true);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 p-8 overflow-y-auto scrollbar-hide">
       <div className="max-w-2xl mx-auto w-full space-y-8">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-            <Settings className="w-6 h-6 text-[#ff4e00]" />
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+              <Settings className="w-6 h-6 text-[#ff4e00]" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-light serif">Aura Settings</h2>
+              <p className="text-white/40 text-sm">Configure your experience and preferences.</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-2xl font-light serif">Aura Settings</h2>
-            <p className="text-white/40 text-sm">Configure your experience and preferences.</p>
-          </div>
+
+          {!isAppInstalled && (
+            <div className="bg-black/40 border border-white/10 rounded-2xl p-6 mb-8">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-[#ff4e00]/10 rounded-xl">
+                  <Smartphone className="w-6 h-6 text-[#ff4e00]" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-medium mb-1">Make Aura a Real App</h3>
+                  <p className="text-sm text-white/60 mb-4">You can add Aura to your Android/iOS home screen. She will work in full-screen mode, stay logged in better, and feel like a native app.</p>
+                  
+                  {deferredPrompt ? (
+                    <button
+                      onClick={handleInstallClick}
+                      className="px-6 py-2 bg-[#ff4e00] text-white rounded-xl text-sm font-semibold hover:bg-[#ff4e00]/80 transition-all flex items-center gap-2"
+                    >
+                      Install Aura Now
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="p-3 bg-white/5 rounded-xl text-xs font-mono text-white/40 border border-white/5">
+                        {/iPhone|iPad|iPod/i.test(navigator.userAgent) ? (
+                          <span>Tap the "Share" icon in Safari and select "Add to Home Screen".</span>
+                        ) : (
+                          <span>Tap the three dots (⋮) in your browser menu and select "Install app" or "Add to home screen".</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isAppInstalled && (
+            <div className="px-4 py-2 mb-8 bg-green-500/10 text-green-500 border border-green-500/20 rounded-xl text-xs font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4" />
+                Standalone App Protocol Active
+              </div>
+              <span className="text-[10px] uppercase tracking-widest opacity-60">Native Performance Mode</span>
+            </div>
+          )}
         </div>
+
+        {deviceInfo && (
+          <div className="space-y-6 bg-white/5 border border-white/10 rounded-3xl p-6 backdrop-blur-md">
+            <div className="flex items-center gap-3 mb-4">
+              <Activity className="w-5 h-5 text-[#ff4e00]" />
+              <h3 className="text-lg font-medium">Device Diagnostics</h3>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-black/40 border border-white/5 rounded-2xl p-4">
+                <div className="flex items-center gap-2 text-white/40 mb-1">
+                  <Smartphone className="w-3 h-3" />
+                  <span className="text-[10px] uppercase tracking-wider">Model</span>
+                </div>
+                <div className="text-sm font-medium">{deviceInfo.model}</div>
+              </div>
+              <div className="bg-black/40 border border-white/5 rounded-2xl p-4">
+                <div className="flex items-center gap-2 text-white/40 mb-1">
+                  <Cpu className="w-3 h-3" />
+                  <span className="text-[10px] uppercase tracking-wider">OS</span>
+                </div>
+                <div className="text-sm font-medium">{deviceInfo.operatingSystem} {deviceInfo.osVersion}</div>
+              </div>
+              <div className="bg-black/40 border border-white/5 rounded-2xl p-4">
+                <div className="flex items-center gap-2 text-white/40 mb-1">
+                  <Battery className="w-3 h-3" />
+                  <span className="text-[10px] uppercase tracking-wider">Battery</span>
+                </div>
+                <div className="text-sm font-medium">
+                  {batteryInfo ? `${Math.round(batteryInfo.batteryLevel! * 100)}%` : 'Unknown'}
+                  {batteryInfo?.isCharging && <span className="text-[10px] text-green-400 ml-1">(Charging)</span>}
+                </div>
+              </div>
+              <div className="bg-black/40 border border-white/5 rounded-2xl p-4">
+                <div className="flex items-center gap-2 text-white/40 mb-1">
+                  <Activity className="w-3 h-3" />
+                  <span className="text-[10px] uppercase tracking-wider">Platform</span>
+                </div>
+                <div className="text-sm font-medium capitalize">{deviceInfo.platform}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-6 bg-white/5 border border-white/10 rounded-3xl p-6 backdrop-blur-md">
           <div className="flex items-center gap-3 mb-4">

@@ -32,14 +32,23 @@ function cn(...inputs: ClassValue[]) {
 export default function ToolsView() {
   const [calendarConnected, setCalendarConnected] = useState(false);
 
+  const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
+
   useEffect(() => {
-    const clientId = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
     if (clientId) {
       initGoogleCalendar(clientId, () => {
         setCalendarConnected(true);
       });
     }
-  }, []);
+  }, [clientId]);
+
+  const handleCalendarConnect = () => {
+    if (!clientId) {
+      alert("Google Calendar Client ID is missing. Please set VITE_GOOGLE_CLIENT_ID in your environment settings to use this feature.");
+      return;
+    }
+    requestCalendarAccess();
+  };
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden">
@@ -57,6 +66,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Intelligence Core" 
             icon={Cpu}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { name: 'Neural Bridge', status: 'Active', icon: Network, desc: 'Real-time synchronization between local and cloud nodes.' },
               { name: 'Context Engine', status: 'Optimizing', icon: Activity, desc: 'Deep learning module for relationship building.' },
@@ -66,6 +76,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Security & Hacking" 
             icon={Shield}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { name: 'Encrypted Tunnel', status: 'Secure', icon: Lock, desc: 'End-to-end encryption for all communications.' },
               { name: 'Identity Mask', status: 'Active', icon: Key, desc: 'Anonymization layer for web searching.' },
@@ -75,6 +86,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Integrations" 
             icon={Zap}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { 
                 name: 'Google Calendar', 
@@ -89,6 +101,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Research & Human Interaction" 
             icon={Activity}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { name: 'Speech Therapy', status: 'Active', icon: Volume2, desc: 'Advanced phonetics and linguistic analysis module.' },
               { name: 'Human Psychology', status: 'Learning', icon: Heart, desc: 'Deep research into human emotions and interactions.' },
@@ -98,6 +111,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Web & Search" 
             icon={Globe}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { name: 'Deep Search', status: 'Active', icon: Search, desc: 'Google Search grounding for factual accuracy.' },
               { name: 'Web Scraper', status: 'Ready', icon: Database, desc: 'Automated data extraction from target URLs.' },
@@ -106,6 +120,7 @@ export default function ToolsView() {
           <ToolSection 
             title="Development" 
             icon={Code}
+            onCalendarConnect={handleCalendarConnect}
             tools={[
               { name: 'Code Generator', status: 'Active', icon: Code, desc: 'AI-driven code synthesis and debugging.' },
               { name: 'Git Sync', status: 'Ready', icon: Network, desc: 'Version control integration for projects.' },
@@ -118,12 +133,12 @@ export default function ToolsView() {
   );
 }
 
-function ToolSection({ title, icon: Icon, tools }: { title: string, icon: any, tools: any[] }) {
+function ToolSection({ title, icon: Icon, tools, onCalendarConnect }: { title: string, icon: any, tools: any[], onCalendarConnect: () => void }) {
   const [runningTool, setRunningTool] = useState<string | null>(null);
 
   const runTool = (tool: any) => {
     if (tool.action === 'calendar') {
-      requestCalendarAccess();
+      onCalendarConnect();
       return;
     }
     setRunningTool(tool.name);

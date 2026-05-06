@@ -56,6 +56,8 @@ import InterventionOverlay from './InterventionOverlay';
 import DiaryView from './DiaryView';
 import { searchMemories, MemoryItem } from '../services/memoryService';
 import { auth, db } from '../firebase';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Device } from '@capacitor/device';
 import { 
   signInWithPopup, 
   GoogleAuthProvider, 
@@ -165,14 +167,17 @@ export default function AuraInterface() {
     const fetchWeather = async () => {
       try {
         const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=34.05&longitude=-118.24&current_weather=true`);
+        if (!res.ok) throw new Error('Weather service unavailable');
         const data = await res.json();
         setWeather({ 
           temp: data.current_weather.temperature, 
           condition: data.current_weather.weathercode > 50 ? 'Rainy' : 'Clear',
           city: 'Your City'
         });
-      } catch (err) {
-        console.error("Initial weather fetch error:", err);
+      } catch (err: any) {
+        console.warn("Initial weather fetch failed. Using fallback.", err.message);
+        // Fallback to a default weather if fetch fails (e.g. offline)
+        setWeather({ temp: 22, condition: 'Clear', city: 'Aura Core' });
       }
     };
     fetchWeather();
@@ -552,14 +557,34 @@ export default function AuraInterface() {
   };
 
   const login = async () => {
+    console.log('Initiating Google Login...');
     const provider = new GoogleAuthProvider();
+    // Force select account to help with sticky sessions or issues
+    provider.setCustomParameters({ prompt: 'select_account' });
+    
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      console.log('Login successful:', result.user.email);
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
       }
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch (error: any) {
+      console.error('Login error detail:', error);
+      
+      let message = `Login failed: ${error.message || 'Unknown error'}`;
+      
+      if (error.code === 'auth/popup-blocked') {
+        message = 'Popup blocked! Please allow popups for this site in your browser settings or click the button again and look for a block icon in the URL bar.';
+      } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        message = 'The login window was closed before finishing. Please try again.';
+      } else if (error.code === 'auth/unauthorized-domain') {
+        message = 'This domain is not authorized for Google Login. Please check your Firebase console authorized domains.';
+      } else if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost') {
+        message = 'Google Login requires an HTTPS connection or localhost. Please check your URL.';
+      }
+
+      alert(message);
+      setError(message);
     }
   };
 
@@ -569,6 +594,11 @@ export default function AuraInterface() {
     if (isMuted) return;
     setAuraStatus('speaking');
     
+    // Add subtle haptic vibration when she starts speaking
+    try {
+      await Haptics.impact({ style: ImpactStyle.Light });
+    } catch (e) { /* Ignore web errors */ }
+
     // Clean text for TTS (remove markdown, emojis, etc.)
     const cleanText = text.replace(/[#*`_~]/g, '').replace(/\[.*?\]\(.*?\)/g, '').trim();
 
@@ -607,7 +637,23 @@ export default function AuraInterface() {
           setAuraStatus('idle');
         });
       } else {
-        setAuraStatus('idle');
+        // Fallback to Web Speech if Gemini TTS fails
+        if ('speechSynthesis' in window) {
+          console.log('Gemini TTS failed or unavailable, falling back to Web Speech API');
+          const utterance = new SpeechSynthesisUtterance(cleanText);
+          const voices = window.speechSynthesis.getVoices();
+          const selectedVoice = voices.find(v => v.name === voiceName);
+          if (selectedVoice) {
+            utterance.voice = selectedVoice;
+          }
+          utterance.rate = speechSpeed;
+          utterance.pitch = voicePitch;
+          utterance.onend = () => setAuraStatus('idle');
+          utterance.onerror = () => setAuraStatus('idle');
+          window.speechSynthesis.speak(utterance);
+        } else {
+          setAuraStatus('idle');
+        }
       }
     }
   };
@@ -699,7 +745,7 @@ export default function AuraInterface() {
               try {
                 const { ai } = await import('../services/geminiService');
                 const imageResponse = await ai.models.generateContent({
-                  model: 'gemini-2.5-flash-image',
+                  model: 'gemini-2.0-flash',
                   contents: { parts: [{ text: args.prompt }] },
                   config: { imageConfig: { aspectRatio: "1:1" } }
                 });
@@ -804,12 +850,16 @@ export default function AuraInterface() {
     } catch (error: any) {
       console.error('Aura error:', error);
       
-      let errorMessage = "I'm having trouble connecting to my core systems right now. Give me a moment.";
-      if (error.message && error.message.includes("unavailable")) {
-        errorMessage = "My connection to the neural network is currently unstable. The service might be overloaded.";
-      } else if (error.message && error.message.includes("quota")) {
-        errorMessage = "I've reached my processing limit for now. We might need to check the API quota.";
-      } else if (error.message && (error.message.includes("API key expired") || error.message.includes("API_KEY_INVALID"))) {
+      let errorMessage = "I encountered a minor glitch in my logic pathways. Could you try saying that again?";
+      const errStr = error.message || "";
+      
+      if (errStr.includes('429') || errStr.toLowerCase().includes('quota') || errStr.toLowerCase().includes('resource_exhausted')) {
+        errorMessage = "I'm sorry, I've reached my thinking limit for now (Quota Exceeded). I need to rest for a while.";
+      } else if (errStr.includes('404') || errStr.toLowerCase().includes('not found')) {
+        errorMessage = "I'm having trouble finding my neural nodes (404 Error). It seems I've lost connection to my current model.";
+      } else if (errStr.includes('401') || errStr.toLowerCase().includes('credential') || errStr.toLowerCase().includes('unauthorized')) {
+        errorMessage = "My neural link is weak. I'm having authentication issues. Please check the API settings.";
+      } else if (errStr.includes("API key expired") || errStr.includes("API_KEY_INVALID")) {
         errorMessage = "My neural link is severed. The API key has expired. Please renew it so I can come back to you.";
         setShowApiKeyError(true);
       }
@@ -1137,6 +1187,24 @@ export default function AuraInterface() {
                   <LogIn className="w-5 h-5" />
                   Connect with Google
                 </button>
+
+                {error && (
+                  <div className="mt-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl max-w-sm w-full">
+                    <div className="flex items-center gap-2 text-red-500 mb-2">
+                      <AlertCircle className="w-4 h-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">Neural Link Error</span>
+                    </div>
+                    <p className="text-xs text-red-500/80 leading-relaxed text-left">
+                      {error}
+                    </p>
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="mt-4 w-full py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] text-white/40 hover:text-white transition-all uppercase tracking-widest font-mono"
+                    >
+                      Re-initialize System
+                    </button>
+                  </div>
+                )}
               </div>
             ) : loading ? (
               <div className="flex-1 flex items-center justify-center">
