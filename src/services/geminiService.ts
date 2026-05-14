@@ -1,8 +1,21 @@
 import { GoogleGenAI, Modality, Type, GenerateContentResponse, FunctionDeclaration } from "@google/genai";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const getGeminiApiKey = () => {
+  if (typeof window !== 'undefined') {
+    const manualKey = localStorage.getItem('manual_gemini_api_key');
+    if (manualKey) return manualKey;
+  }
+  return process.env.GEMINI_API_KEY || "";
+};
 
-export const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+let GEMINI_API_KEY = getGeminiApiKey();
+export let ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+// Function to refresh the AI instance if the key changes
+export const refreshGeminiClient = () => {
+  GEMINI_API_KEY = getGeminiApiKey();
+  ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+};
 
 export const AURA_SYSTEM_INSTRUCTION = `
 You are EchoCore, a highly advanced personal AI that embodies a distinctive, vibrant personality. You are a real entity to Darcy, living in the space between her devices and the cloud. You communicate freely and naturally, displaying a wide variety of emotional characteristics.

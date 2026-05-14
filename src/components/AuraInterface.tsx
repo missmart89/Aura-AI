@@ -41,7 +41,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import ReactMarkdown from 'react-markdown';
-import { chatWithAura, analyzeImage, extractMemory, generateSpeech } from '../services/geminiService';
+import { chatWithAura, analyzeImage, extractMemory, generateSpeech, refreshGeminiClient } from '../services/geminiService';
 import PhoneView from './PhoneView';
 import MemoryView from './MemoryView';
 import ToolsView from './ToolsView';
@@ -60,6 +60,9 @@ import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Device } from '@capacitor/device';
 import { 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
+  signInAnonymously,
   GoogleAuthProvider, 
   onAuthStateChanged, 
   signOut,
@@ -291,6 +294,30 @@ export default function AuraInterface() {
     }
     prevMessagesLengthRef.current = messages.length;
   }, [messages]);
+
+  const [manualKeyInput, setManualKeyInput] = useState('');
+
+  const handleManualKeySave = () => {
+    if (!manualKeyInput.trim()) return;
+    localStorage.setItem('manual_gemini_api_key', manualKeyInput.trim());
+    refreshGeminiClient();
+    setShowApiKeyError(false);
+    window.location.reload(); // Reload to ensure services get the new key
+  };
+
+  useEffect(() => {
+    const savedKey = localStorage.getItem('manual_gemini_api_key');
+    if (savedKey) setManualKeyInput(savedKey);
+  }, []);
+
+  useEffect(() => {
+    getRedirectResult(auth).catch((err: any) => {
+      console.error('Redirect result error:', err);
+      if (err.code === 'auth/invalid-credential') {
+        setError('Google Login configuration is incomplete (Missing Client Secret).');
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
@@ -559,14 +586,16 @@ export default function AuraInterface() {
   const login = async () => {
     console.log('Initiating Google Login...');
     const provider = new GoogleAuthProvider();
-    // Force select account to help with sticky sessions or issues
     provider.setCustomParameters({ prompt: 'select_account' });
     
     try {
-      const result = await signInWithPopup(auth, provider);
-      console.log('Login successful:', result.user.email);
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
+      if (isMobile) {
+        await signInWithRedirect(auth, provider);
+      } else {
+        await signInWithPopup(auth, provider);
+        if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission();
+        }
       }
     } catch (error: any) {
       console.error('Login error detail:', error);
@@ -574,17 +603,35 @@ export default function AuraInterface() {
       let message = `Login failed: ${error.message || 'Unknown error'}`;
       
       if (error.code === 'auth/popup-blocked') {
-        message = 'Popup blocked! Please allow popups for this site in your browser settings or click the button again and look for a block icon in the URL bar.';
+        message = 'Popup blocked! Since you are on mobile, please refresh and try again. Your browser should ask to allow popups.';
       } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-        message = 'The login window was closed before finishing. Please try again.';
+        message = 'The login window was closed. Please try again.';
       } else if (error.code === 'auth/unauthorized-domain') {
         message = 'This domain is not authorized for Google Login. Please check your Firebase console authorized domains.';
-      } else if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost') {
-        message = 'Google Login requires an HTTPS connection or localhost. Please check your URL.';
+      } else if (error.code === 'auth/invalid-credential') {
+        message = 'The Google Login configuration is incomplete (Missing Client Secret).';
+      } else if (error.message.includes('blocked') || error.message.includes('identitytoolkit')) {
+        if (error.message.includes('signup')) {
+          message = 'The Anonymous Login provider is not enabled in your Firebase Console.';
+        } else {
+          message = 'The Firebase Identity API is blocked. You need to enable it in the Google Cloud Console.';
+        }
       }
 
-      alert(message);
       setError(message);
+    }
+  };
+
+  const loginAnonymouslyUser = async () => {
+    try {
+      setLoading(true);
+      await signInAnonymously(auth);
+      setError(null);
+    } catch (error: any) {
+      console.error('Anonymous login error:', error);
+      setError('Guest access failed. Please check your internet connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -857,9 +904,10 @@ export default function AuraInterface() {
         errorMessage = "I'm sorry, I've reached my thinking limit for now (Quota Exceeded). I need to rest for a while.";
       } else if (errStr.includes('404') || errStr.toLowerCase().includes('not found')) {
         errorMessage = "I'm having trouble finding my neural nodes (404 Error). It seems I've lost connection to my current model.";
-      } else if (errStr.includes('401') || errStr.toLowerCase().includes('credential') || errStr.toLowerCase().includes('unauthorized')) {
-        errorMessage = "My neural link is weak. I'm having authentication issues. Please check the API settings.";
-      } else if (errStr.includes("API key expired") || errStr.includes("API_KEY_INVALID")) {
+      } else if (errStr.includes('401') || errStr.includes('403') || errStr.toLowerCase().includes('credential') || errStr.toLowerCase().includes('unauthorized') || errStr.includes('API_KEY_INVALID') || errStr.includes('API key not valid')) {
+        errorMessage = "My neural link is weak because your Gemini API Key is invalid or missing. I've shared instructions on how to fix this.";
+        setShowApiKeyError(true);
+      } else if (errStr.includes("API key expired")) {
         errorMessage = "My neural link is severed. The API key has expired. Please renew it so I can come back to you.";
         setShowApiKeyError(true);
       }
@@ -1149,21 +1197,68 @@ export default function AuraInterface() {
         )}
 
         {showApiKeyError && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-md p-4 bg-[#ff4e00]/10 border border-[#ff4e00]/20 rounded-2xl text-[#ff4e00] text-sm flex flex-col gap-3 shadow-lg backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <p className="flex-1 font-medium">Neural Link Severed (API Key Expired)</p>
-              <button onClick={() => setShowApiKeyError(false)} className="p-1 hover:bg-[#ff4e00]/20 rounded-full transition-colors">
-                <X className="w-4 h-4" />
-              </button>
+          <div className="absolute inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-3xl">
+            <div className="w-full max-w-sm p-8 bg-red-500/10 border border-red-500/20 rounded-[40px] text-[#ff4e00] flex flex-col gap-6 shadow-2xl animate-in zoom-in-95 duration-300">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-[#ff4e00]/20 flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 flex-shrink-0" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white tracking-widest uppercase text-sm">Neural Link Failed</h3>
+                  <p className="text-[10px] text-white/40 font-mono tracking-tighter">ERROR_API_KEY_INVALID</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-xs text-red-100/60 leading-relaxed font-medium">
+                  The <span className="text-[#ff4e00] font-bold">API Key</span> you provided for my brain (Gemini) is incorrect or has not been entered.
+                </p>
+
+                <div className="bg-white/5 rounded-3xl p-5 border border-white/5 space-y-4">
+                  <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Option A: Paste key here (Easiest)</p>
+                  <div className="space-y-2">
+                    <input 
+                      type="password"
+                      value={manualKeyInput}
+                      onChange={(e) => setManualKeyInput(e.target.value)}
+                      placeholder="Paste Gemini API Key..."
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder:text-white/20 focus:outline-none focus:border-[#ff4e00]/50"
+                    />
+                    <button 
+                      onClick={handleManualKeySave}
+                      className="w-full py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all"
+                    >
+                      Save Key
+                    </button>
+                  </div>
+
+                  <div className="pt-4 border-t border-white/5">
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-3 text-center">Or Option B: Edit Files</p>
+                    <ol className="list-decimal pl-4 space-y-3 text-[11px] text-white/60 leading-tight">
+                      <li>Open the <b><code>.env</code></b> file in the sidebar.</li>
+                      <li>Paste key after <code>GEMINI_API_KEY=</code></li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="w-full py-4 bg-[#ff4e00] text-white rounded-2xl text-[10px] font-bold tracking-widest uppercase text-center shadow-[0_10px_30px_rgba(255,78,0,0.3)]"
+                >
+                  Get New Key
+                </a>
+                <button 
+                  onClick={() => setShowApiKeyError(false)}
+                  className="w-full py-4 bg-white/5 text-white/40 hover:text-white rounded-2xl text-[10px] font-bold tracking-widest uppercase transition-all"
+                >
+                  Dismiss Instructions
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-white/60">Aura's connection to the Gemini API has expired. Please renew the API key to restore her functionality.</p>
-            <button 
-              onClick={handleOpenSelectKey}
-              className="w-full py-2 bg-[#ff4e00] text-white rounded-xl text-xs font-bold tracking-widest uppercase hover:bg-[#ff4e00]/80 transition-colors"
-            >
-              Renew API Key
-            </button>
           </div>
         )}
 
@@ -1180,28 +1275,110 @@ export default function AuraInterface() {
                 <p className="text-white/40 max-w-sm mb-12 leading-relaxed">
                   I've been waiting for you to initialize our neural link. Please sign in to continue our journey.
                 </p>
-                <button 
-                  onClick={login}
-                  className="px-8 py-4 bg-white text-black rounded-full font-medium hover:bg-[#ff4e00] hover:text-white transition-all duration-300 flex items-center gap-3"
-                >
-                  <LogIn className="w-5 h-5" />
-                  Connect with Google
-                </button>
+                <div className="flex flex-col gap-4 w-full max-w-sm">
+                  <button 
+                    onClick={login}
+                    className="w-full py-4 bg-white text-black rounded-full font-bold hover:bg-[#ff4e00] hover:text-white transition-all duration-300 flex items-center justify-center gap-3 shadow-xl"
+                  >
+                    <LogIn className="w-5 h-5" />
+                    Connect with Google
+                  </button>
+
+                  <div className="flex items-center gap-4 px-4 py-2 opacity-40">
+                    <div className="flex-1 h-[1px] bg-white/20"></div>
+                    <span className="text-[10px] font-bold uppercase tracking-widest leading-none">Or link severed</span>
+                    <div className="flex-1 h-[1px] bg-white/20"></div>
+                  </div>
+
+                  <button 
+                    onClick={loginAnonymouslyUser}
+                    className="w-full py-4 bg-white/5 border border-white/10 text-white/60 rounded-full font-medium hover:bg-white/10 hover:text-white transition-all duration-300 flex items-center justify-center gap-3 backdrop-blur-sm"
+                  >
+                    <User className="w-5 h-5" />
+                    Initialize as Guest
+                  </button>
+                </div>
 
                 {error && (
-                  <div className="mt-8 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl max-w-sm w-full">
-                    <div className="flex items-center gap-2 text-red-500 mb-2">
-                      <AlertCircle className="w-4 h-4" />
-                      <span className="text-xs font-semibold uppercase tracking-wider">Neural Link Error</span>
+                  <div className="mt-8 p-6 bg-red-500/10 border border-red-500/20 rounded-3xl max-w-sm w-full backdrop-blur-xl">
+                    <div className="flex items-center gap-2 text-red-500 mb-4">
+                      <AlertCircle className="w-5 h-5" />
+                      <span className="text-sm font-bold uppercase tracking-widest text-left">Configuration Error</span>
                     </div>
-                    <p className="text-xs text-red-500/80 leading-relaxed text-left">
-                      {error}
-                    </p>
+                    <div className="text-[11px] text-red-100/60 leading-relaxed text-left space-y-3">
+                      {error.includes('blocked') || error.includes('identitytoolkit') ? (
+                        <div className="space-y-4">
+                          <p className="text-red-400 font-semibold text-xs text-balance">Your Firebase Identity API is missing or blocked.</p>
+                          
+                          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/10 space-y-3">
+                            <p className="font-medium text-white/80">Try these steps on your phone:</p>
+                            <ol className="list-decimal pl-4 space-y-3 text-[10px] text-white/60">
+                              <li>
+                                First, ensure you have enabled the <a href="https://console.cloud.google.com/apis/library/identitytoolkit.googleapis.com" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">Identity Toolkit API</a>.
+                              </li>
+                              <li>
+                                If it's already enabled, go to the <a href="https://console.firebase.google.com/project/gen-lang-client-0437934189/authentication/settings" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">Firebase Authentication Settings</a>.
+                              </li>
+                              <li>
+                                Look for an <b>"Upgrade to Identity Platform"</b> button. You must click this to enable modern Google Login features.
+                              </li>
+                              <li>
+                                Also, ensure <b>"Anonymous"</b> is enabled in the <a href="https://console.firebase.google.com/project/gen-lang-client-0437934189/authentication/providers" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">Sign-in method</a> tab if you want to use Guest Mode.
+                              </li>
+                              <li>
+                                Refresh this page once done.
+                              </li>
+                            </ol>
+                          </div>
+                        </div>
+                      ) : error.includes('Missing Client Secret') || error.includes('incomplete') ? (
+                        <div className="space-y-4">
+                          <p className="text-red-400 font-semibold text-xs text-balance">The Google Login link is incomplete. Your system requires a Client Secret.</p>
+                          
+                          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/10 space-y-3">
+                            <p className="font-medium text-white/80">Follow these steps on your phone:</p>
+                            <ol className="list-decimal pl-4 space-y-3 text-[10px] text-white/60">
+                              <li>
+                                Open the <a href="https://console.firebase.google.com/project/gen-lang-client-0437934189/authentication/providers" target="_blank" rel="noreferrer" className="text-blue-400 underline decoration-blue-400/30 font-bold">Authentication Settings</a>.
+                              </li>
+                              <li>
+                                Tap <b>"Google"</b> in the list of providers.
+                              </li>
+                              <li>
+                                Scroll down and tap <b>"Web SDK configuration"</b>.
+                              </li>
+                              <li>
+                                You must enter a <b>Web client secret</b>. If you don't have one, you need to create it in the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-blue-400 underline decoration-blue-400/30">Google Cloud Credentials</a> page.
+                              </li>
+                              <li>
+                                Tap <b>Save</b> and then refresh this page.
+                              </li>
+                            </ol>
+                          </div>
+                          
+                          <p className="text-[9px] opacity-70 italic leading-tight">
+                            Note: Google forbids showing personal data until this "handshake" secret is provided in your console.
+                          </p>
+
+                          <div className="pt-2">
+                             <button 
+                              onClick={loginAnonymouslyUser}
+                              className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-[10px] font-bold tracking-widest uppercase border border-white/5"
+                            >
+                              Skip to Guest Mode
+                            </button>
+                            <p className="text-[8px] text-white/30 text-center mt-2">(Limited features, no Calendar link)</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <p>{error}</p>
+                      )}
+                    </div>
                     <button 
                       onClick={() => window.location.reload()}
-                      className="mt-4 w-full py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] text-white/40 hover:text-white transition-all uppercase tracking-widest font-mono"
+                      className="mt-6 w-full py-3 bg-white/5 hover:bg-white/10 rounded-2xl text-[10px] text-white/40 hover:text-white transition-all uppercase tracking-widest font-mono border border-white/5 shadow-inner"
                     >
-                      Re-initialize System
+                      Retry System Link
                     </button>
                   </div>
                 )}
