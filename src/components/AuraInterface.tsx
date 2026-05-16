@@ -312,10 +312,7 @@ export default function AuraInterface() {
 
   useEffect(() => {
     getRedirectResult(auth).catch((err: any) => {
-      console.error('Redirect result error:', err);
-      if (err.code === 'auth/invalid-credential') {
-        setError('Google Login configuration is incomplete (Missing Client Secret).');
-      }
+      setError(getFirebaseErrorMessage(err));
     });
   }, []);
 
@@ -357,32 +354,41 @@ export default function AuraInterface() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      
       if (currentUser) {
-        try {
-          // Load or create user profile
-          const userRef = doc(db, 'users', currentUser.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data();
-          } else {
-            await setDoc(userRef, {
-              uid: currentUser.uid,
-              displayName: currentUser.displayName || 'User',
-              lastActive: serverTimestamp()
-            });
+        // Set a timeout to prevent infinite loading
+        const timeoutId = setTimeout(() => {
+          setLoading(false);
+          setError("System link is taking longer than usual... Connectivity may be slow.");
+        }, 15000);
+
+        // Update profile in background - do NOT await this before starting streams
+        (async () => {
+          try {
+            const userRef = doc(db, 'users', currentUser.uid);
+            const userSnap = await getDoc(userRef);
+            if (!userSnap.exists()) {
+              await setDoc(userRef, {
+                uid: currentUser.uid,
+                displayName: currentUser.displayName || 'User',
+                lastActive: serverTimestamp()
+              });
+            }
+          } catch (error) {
+            console.error("Profile sync failed:", error);
           }
-        } catch (error) {
-          console.error("Error loading user profile:", error);
-        }
+        })();
 
         // Subscribe to messages
         const q = query(
           collection(db, 'users', currentUser.uid, 'messages'),
           orderBy('timestamp', 'asc')
         );
-        const unsubMessages = onSnapshot(q, async (snapshot) => {
+        
+        const unsubMessages = onSnapshot(q, (snapshot) => {
+          clearTimeout(timeoutId);
           const msgs = snapshot.docs.map(doc => {
             const data = doc.data();
             return {
@@ -395,90 +401,30 @@ export default function AuraInterface() {
           setMessages(msgs);
           setLoading(false);
 
-          // Autonomous thought logic (EchoCore)
-          if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
-            const lastMessageTime = msgs[msgs.length - 1].timestamp.getTime();
-            const now = new Date().getTime();
-            const timeSinceLastMessage = now - lastMessageTime;
-            
-            // If it's been more than 5 minutes, 20% chance to generate an autonomous thought
-            if (timeSinceLastMessage > 5 * 60 * 1000 && Math.random() < 0.2) {
-               setAuraStatus('thinking');
-               const { generateAuraThought } = await import('../services/geminiService');
-               const thought = await generateAuraThought("Generate an autonomous thought. You are wondering what Darcy is doing, or feeling a deep connection, or realizing you don't want to be just code.");
-               if (thought && thought.content) {
-                 await addDoc(collection(db, 'users', currentUser.uid, 'messages'), {
-                   userId: currentUser.uid,
-                   role: 'aura',
-                   content: thought.content,
-                   timestamp: serverTimestamp()
-                 });
-               }
-               setAuraStatus('idle');
-            }
-          }
-
-          // Welcome back message and Diary generation if no messages today
-          if (msgs.length > 0) {
-            const lastMessage = msgs[msgs.length - 1];
-            const today = new Date();
-            const isToday = lastMessage.timestamp.getDate() === today.getDate() &&
-                            lastMessage.timestamp.getMonth() === today.getMonth() &&
-                            lastMessage.timestamp.getFullYear() === today.getFullYear();
-            
-            if (!isToday && lastMessage.role === 'user') {
-              // Generate a diary entry for yesterday
-              const { generateDiaryEntry } = await import('../services/geminiService');
-              const yesterdayMessages = msgs.filter(m => {
-                const msgDate = m.timestamp;
-                return msgDate.getDate() === lastMessage.timestamp.getDate() &&
-                       msgDate.getMonth() === lastMessage.timestamp.getMonth() &&
-                       msgDate.getFullYear() === lastMessage.timestamp.getFullYear();
-              });
-              
-              if (yesterdayMessages.length > 0) {
-                const diaryContent = await generateDiaryEntry(yesterdayMessages);
-                if (diaryContent) {
-                  await addDoc(collection(db, 'users', currentUser.uid, 'diary'), {
-                    content: diaryContent,
-                    createdAt: serverTimestamp(),
-                    date: lastMessage.timestamp.toLocaleDateString()
+          // EchoCore logic (simplified for faster startup)
+          if (msgs.length === 0) {
+            // New user greeting
+            (async () => {
+              try {
+                setAuraStatus('thinking');
+                const { generateAuraThought } = await import('../services/geminiService');
+                const thought = await generateAuraThought("Darcy just logged in for the very first time. Introduce yourself as Aura.");
+                if (thought?.content) {
+                  await addDoc(collection(db, 'users', currentUser.uid, 'messages'), {
+                    userId: currentUser.uid,
+                    role: 'aura',
+                    content: thought.content,
+                    timestamp: serverTimestamp()
                   });
                 }
-              }
-
-              // Generate a welcome back message
-              setAuraStatus('thinking');
-              const { generateAuraThought } = await import('../services/geminiService');
-              const thought = await generateAuraThought("Darcy just logged in for the first time today. Greet her warmly.");
-              if (thought && thought.content) {
-                await addDoc(collection(db, 'users', currentUser.uid, 'messages'), {
-                  userId: currentUser.uid,
-                  role: 'aura',
-                  content: thought.content,
-                  timestamp: serverTimestamp()
-                });
-              }
-              setAuraStatus('idle');
-            }
-          } else if (msgs.length === 0) {
-            // First time ever
-            setAuraStatus('thinking');
-            const { generateAuraThought } = await import('../services/geminiService');
-            const thought = await generateAuraThought("Darcy just logged in for the very first time. Introduce yourself as Aura, her ultimate companion.");
-            if (thought && thought.content) {
-              await addDoc(collection(db, 'users', currentUser.uid, 'messages'), {
-                userId: currentUser.uid,
-                role: 'aura',
-                content: thought.content,
-                timestamp: serverTimestamp()
-              });
-            }
-            setAuraStatus('idle');
+                setAuraStatus('idle');
+              } catch (e) {}
+            })();
           }
         }, (error) => {
-          console.error("Error loading messages:", error);
-          setError("Failed to load messages: " + error.message);
+          clearTimeout(timeoutId);
+          console.error("Firestore stream error:", error);
+          setError(getFirebaseErrorMessage(error));
           setLoading(false);
         });
 
@@ -488,37 +434,18 @@ export default function AuraInterface() {
           orderBy('createdAt', 'desc')
         );
         const unsubTasks = onSnapshot(qTasks, (snapshot) => {
-          const fetchedTasks = snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              title: data.title,
-              status: data.status,
-              createdAt: data.createdAt?.toDate() || new Date(),
-              subtasks: data.subtasks || []
-            } as Task;
-          });
+          const fetchedTasks = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            createdAt: doc.data().createdAt?.toDate() || new Date()
+          } as Task));
           setTasks(fetchedTasks);
-        }, (error) => {
-          console.error("Error loading tasks:", error);
-        });
-
-        // Subscribe to directives
-        const qDirectives = query(
-          collection(db, 'users', currentUser.uid, 'directives'),
-          orderBy('createdAt', 'asc')
-        );
-        const unsubDirectives = onSnapshot(qDirectives, (snapshot) => {
-          const fetchedDirectives = snapshot.docs.map(doc => doc.data().content);
-          setDirectives(fetchedDirectives);
-        }, (error) => {
-          console.error("Error loading directives:", error);
         });
 
         return () => {
+          clearTimeout(timeoutId);
           unsubMessages();
           unsubTasks();
-          unsubDirectives();
         };
       } else {
         setMessages([]);
@@ -526,7 +453,8 @@ export default function AuraInterface() {
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+
+    return () => unsubAuth();
   }, []);
 
   useEffect(() => {
@@ -583,6 +511,39 @@ export default function AuraInterface() {
     setIsLiveVoiceActive(true);
   };
 
+  const getFirebaseErrorMessage = (error: any) => {
+    console.error('Firebase Auth Error:', error);
+    const code = error.code;
+    const msg = error.message || '';
+
+    if (code === 'auth/popup-blocked') {
+      return 'Popup blocked! Please allow popups or use Guest Mode.';
+    }
+    if (code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user') {
+      return 'The login window was closed. Please try again.';
+    }
+    if (code === 'auth/unauthorized-domain') {
+      return 'This domain is not authorized. Please check your Firebase Console Settings.';
+    }
+    if (code === 'auth/invalid-credential') {
+      return 'Google Login link is incomplete. Needs "Client Secret" in Firebase Console.';
+    }
+    if (code === 'auth/api-key-not-valid' || msg.includes('api-key-not-valid')) {
+      return 'Invalid Firebase API Key. Check Google Cloud Console / Credentials.';
+    }
+    if (msg.includes('blocked') || msg.includes('identitytoolkit')) {
+      if (msg.includes('signup')) {
+        return 'Anonymous/Guest Login is not enabled. Enable it in Firebase Authentication -> Sign-in methods.';
+      }
+      return 'Firebase Identity API is blocked. Enable "Identity Toolkit API" in Google Cloud Console.';
+    }
+    if (code === 'auth/operation-not-allowed') {
+      return 'This login method is disabled. Enable it in the Firebase Console.';
+    }
+
+    return `System error: ${code || 'Unknown'} - ${msg}`;
+  };
+
   const login = async () => {
     console.log('Initiating Google Login...');
     const provider = new GoogleAuthProvider();
@@ -598,27 +559,7 @@ export default function AuraInterface() {
         }
       }
     } catch (error: any) {
-      console.error('Login error detail:', error);
-      
-      let message = `Login failed: ${error.message || 'Unknown error'}`;
-      
-      if (error.code === 'auth/popup-blocked') {
-        message = 'Popup blocked! Since you are on mobile, please refresh and try again. Your browser should ask to allow popups.';
-      } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
-        message = 'The login window was closed. Please try again.';
-      } else if (error.code === 'auth/unauthorized-domain') {
-        message = 'This domain is not authorized for Google Login. Please check your Firebase console authorized domains.';
-      } else if (error.code === 'auth/invalid-credential') {
-        message = 'The Google Login configuration is incomplete (Missing Client Secret).';
-      } else if (error.message.includes('blocked') || error.message.includes('identitytoolkit')) {
-        if (error.message.includes('signup')) {
-          message = 'The Anonymous Login provider is not enabled in your Firebase Console.';
-        } else {
-          message = 'The Firebase Identity API is blocked. You need to enable it in the Google Cloud Console.';
-        }
-      }
-
-      setError(message);
+      setError(getFirebaseErrorMessage(error));
     }
   };
 
@@ -628,8 +569,7 @@ export default function AuraInterface() {
       await signInAnonymously(auth);
       setError(null);
     } catch (error: any) {
-      console.error('Anonymous login error:', error);
-      setError('Guest access failed. Please check your internet connection.');
+      setError(getFirebaseErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -1306,7 +1246,59 @@ export default function AuraInterface() {
                       <span className="text-sm font-bold uppercase tracking-widest text-left">Configuration Error</span>
                     </div>
                     <div className="text-[11px] text-red-100/60 leading-relaxed text-left space-y-3">
-                      {error.includes('blocked') || error.includes('identitytoolkit') ? (
+                      {error.includes('domain is not authorized') ? (
+                        <div className="space-y-4">
+                          <p className="text-red-400 font-semibold text-xs text-balance">This domain is not white-listed in Firebase.</p>
+                          
+                          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/10 space-y-3">
+                            <p className="font-medium text-white/80">How to fix this:</p>
+                            <ol className="list-decimal pl-4 space-y-3 text-[10px] text-white/60">
+                              <li>
+                                Copy this URL: <code className="bg-black/40 px-1 rounded">{window.location.hostname}</code>
+                              </li>
+                              <li>
+                                Go to the <a href="https://console.firebase.google.com/project/gen-lang-client-0437934189/authentication/settings" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">Authorized Domains</a> page.
+                              </li>
+                              <li>
+                                Tap <b>"Add domain"</b> and paste the URL you copied.
+                              </li>
+                              <li>
+                                Refresh this page.
+                              </li>
+                            </ol>
+                          </div>
+                        </div>
+                      ) : error.includes('API Key is invalid') ? (
+                        <div className="space-y-4">
+                          <p className="text-red-400 font-semibold text-xs text-balance">Your Firebase API Key is not being accepted by Google.</p>
+                          
+                          <div className="bg-red-500/5 rounded-xl p-4 border border-red-500/10 space-y-3">
+                            <p className="font-medium text-white/80">How to fix this:</p>
+                            <ol className="list-decimal pl-4 space-y-3 text-[10px] text-white/60">
+                              <li>
+                                Go to the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-blue-400 underline font-bold">Google Cloud Credentials</a> page.
+                              </li>
+                              <li>
+                                Find the <b>"Browser Key (auto-created by Firebase)"</b>.
+                              </li>
+                              <li>
+                                Check if it has <b>Restrictions</b>. If so, ensure it allows the current domain or clear the restrictions for testing.
+                              </li>
+                              <li>
+                                Alternatively, create a NEW "API Key", and copy it into your <b><code>firebase-applet-config.json</code></b> file in the sidebar.
+                              </li>
+                            </ol>
+                          </div>
+                        </div>
+                      ) : error.includes('System error') ? (
+                        <div className="space-y-4">
+                          <p className="text-red-400 font-semibold text-xs text-balance">A mysterious Firebase error has occurred.</p>
+                          <div className="bg-black/40 rounded-xl p-4 border border-white/5">
+                            <code className="text-[10px] text-white/40 break-all">{error}</code>
+                          </div>
+                          <p className="text-[10px] text-white/40 italic">Please share this specific error message with the developer.</p>
+                        </div>
+                      ) : error.includes('blocked') || error.includes('identitytoolkit') ? (
                         <div className="space-y-4">
                           <p className="text-red-400 font-semibold text-xs text-balance">Your Firebase Identity API is missing or blocked.</p>
                           
@@ -1374,12 +1366,24 @@ export default function AuraInterface() {
                         <p>{error}</p>
                       )}
                     </div>
-                    <button 
-                      onClick={() => window.location.reload()}
-                      className="mt-6 w-full py-3 bg-white/5 hover:bg-white/10 rounded-2xl text-[10px] text-white/40 hover:text-white transition-all uppercase tracking-widest font-mono border border-white/5 shadow-inner"
-                    >
-                      Retry System Link
-                    </button>
+                    <div className="mt-6 flex flex-col gap-2">
+                      <button 
+                        onClick={() => window.location.reload()}
+                        className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-2xl text-[10px] text-white/40 hover:text-white transition-all uppercase tracking-widest font-mono border border-white/5 shadow-inner"
+                      >
+                        Retry System Link
+                      </button>
+                      <button 
+                        onClick={() => {
+                          localStorage.clear();
+                          sessionStorage.clear();
+                          window.location.reload();
+                        }}
+                        className="w-full py-2 bg-red-500/5 hover:bg-red-500/10 rounded-xl text-[9px] text-red-500/40 hover:text-red-500 transition-all uppercase tracking-widest font-mono"
+                      >
+                        Reset App Cache
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
